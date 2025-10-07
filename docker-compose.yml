@@ -1,0 +1,66 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: cotacoes_postgres
+    environment:
+      POSTGRES_DB: cotacoes_b3
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cotacoes_network
+
+  # Azurite (Azure Storage Emulator)
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: cotacoes_azurite
+    command: "azurite --blobHost 0.0.0.0 --blobPort 10003 --queueHost 0.0.0.0 --queuePort 10004 --tableHost 0.0.0.0 --tablePort 10005 --location /workspace --debug /workspace/debug.log"
+    ports:
+      - "10003:10003"  # Blob service
+      - "10004:10004"  # Queue service
+      - "10005:10005"  # Table service
+    volumes:
+      - azurite_data:/workspace
+    networks:
+      - cotacoes_network
+
+  # pgAdmin (Opcional - Interface web para PostgreSQL)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: cotacoes_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@cotacoes.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - cotacoes_network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+  azurite_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  cotacoes_network:
+    driver: bridge
