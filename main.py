@@ -61,7 +61,11 @@ def run_pipeline(date_str=None, file_name=None):
 
     # Define data e nome do arquivo
     if not date_str:
-        date_str = yymmdd(datetime.now())
+        # Usa data do dia anterior por padrão (dados mais prováveis de estar disponíveis)
+        from datetime import timedelta
+        yesterday = datetime.now() - timedelta(days=1)
+        date_str = yymmdd(yesterday)
+        print(f"[INFO] Usando data do dia anterior: {date_str}")
 
     if not file_name:
         file_name = f"BVBG186_{date_str}.xml"
@@ -74,7 +78,7 @@ def run_pipeline(date_str=None, file_name=None):
         # Etapa 1: Extração (download da B3 e upload para blob local)
         print("\n[ETAPA 1] Extração de dados da B3...")
         try:
-            extract_run()
+            extract_run(date_str)  # Passa a data para a função de extração
             print("[OK] Extração concluída com sucesso")
         except Exception as e:
             print(f"[ERROR] Falha na extração: {e}")
@@ -111,13 +115,13 @@ def show_help():
 Pipeline de Processamento de Cotações B3
 
 USO:
-    python main.py                    # Executa com data atual
+    python main.py                    # Executa com data do dia anterior
     python main.py YYMMDD            # Executa com data específica
     python main.py --check          # Verifica pré-requisitos
     python main.py --help           # Exibe esta ajuda
 
 EXEMPLOS:
-    python main.py                   # Processa cotações de hoje
+    python main.py                   # Processa cotações de ontem (mais provável de estar disponível)
     python main.py 250923           # Processa cotações de 23/09/2025
     python main.py --check          # Verifica se PostgreSQL e Azurite estão rodando
 
