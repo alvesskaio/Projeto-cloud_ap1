@@ -14,41 +14,76 @@ Requisitos:
 
 import sys
 import os
+import time
 from datetime import datetime
 from helpers import yymmdd
 from extract import run as extract_run
 from transform_load import transform_and_load
 from database import DatabaseManager
 
+def print_timestamp():
+    """Retorna timestamp formatado para logs"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def print_section_header(title):
+    """Imprime cabeçalho de seção formatado"""
+    print("\n" + "=" * 60)
+    print(f"[{print_timestamp()}] {title}")
+    print("=" * 60)
+
 def check_prerequisites():
     """
     Verifica se os pré-requisitos estão disponíveis
     """
-    print("[INFO] Verificando pré-requisitos...")
+    print(f"[{print_timestamp()}] [INFO] Verificando pré-requisitos...")
+    
+    start_time = time.time()
+    prereq_status = []
 
     # Verificar se conseguimos conectar ao banco
-    db = DatabaseManager()
-    if not db.connect():
-        print("[ERROR] PostgreSQL não está disponível em localhost:5433")
-        print("       Execute: docker-compose up -d")
-        return False
-
-    print("[OK] PostgreSQL disponível")
+    print(f"[{print_timestamp()}] [INFO] Testando conexão com PostgreSQL...")
+    try:
+        db = DatabaseManager()
+        if not db.connect():
+            print(f"[{print_timestamp()}] [ERROR] PostgreSQL não está disponível em localhost:5433")
+            print("        Execute: docker-compose up -d")
+            prereq_status.append(("PostgreSQL", False, "Conexão falhou"))
+        else:
+            print(f"[{print_timestamp()}] [OK] PostgreSQL disponível e conectado")
+            prereq_status.append(("PostgreSQL", True, "Conectado"))
+    except Exception as e:
+        print(f"[{print_timestamp()}] [ERROR] Erro ao testar PostgreSQL: {e}")
+        prereq_status.append(("PostgreSQL", False, str(e)))
 
     # Verificar se o Azurite está rodando
+    print(f"[{print_timestamp()}] [INFO] Testando conexão com Azurite (Blob Storage)...")
     try:
         from azure_storage import BlobServiceClient, AZURE_BLOB_CONNECTION
         service = BlobServiceClient.from_connection_string(AZURE_BLOB_CONNECTION)
         # Tentativa simples de listar containers
-        list(service.list_containers())
-        print("[OK] Azurite (Blob Storage) disponível")
+        container_list = list(service.list_containers())
+        container_count = len(container_list)
+        print(f"[{print_timestamp()}] [OK] Azurite disponível ({container_count} containers encontrados)")
+        prereq_status.append(("Azurite", True, f"{container_count} containers"))
     except Exception as e:
-        print(f"[ERROR] Azurite não está disponível em localhost:10003")
+        print(f"[{print_timestamp()}] [ERROR] Azurite não está disponível em localhost:10003")
         print(f"        Erro: {e}")
         print("        Execute: docker-compose up -d")
-        return False
+        prereq_status.append(("Azurite", False, str(e)))
 
-    return True
+    # Resumo dos pré-requisitos
+    elapsed_time = time.time() - start_time
+    print(f"\n[{print_timestamp()}] [INFO] Verificação de pré-requisitos concluída em {elapsed_time:.2f}s")
+    print("📋 Status dos serviços:")
+    
+    all_ok = True
+    for service, status, details in prereq_status:
+        status_icon = "✅" if status else "❌"
+        print(f"   {status_icon} {service}: {details}")
+        if not status:
+            all_ok = False
+    
+    return all_ok
 
 def run_pipeline(date_str=None, file_name=None):
     """
@@ -58,55 +93,74 @@ def run_pipeline(date_str=None, file_name=None):
         date_str: Data no formato YYMMDD (ex: "250923"). Se None, usa data atual
         file_name: Nome específico do arquivo. Se None, usa padrão baseado na data
     """
-
+    pipeline_start_time = time.time()
+    
     # Define data e nome do arquivo
     if not date_str:
         # Usa data do dia anterior por padrão (dados mais prováveis de estar disponíveis)
         from datetime import timedelta
         yesterday = datetime.now() - timedelta(days=1)
         date_str = yymmdd(yesterday)
-        print(f"[INFO] Usando data do dia anterior: {date_str}")
+        print(f"[{print_timestamp()}] [INFO] Usando data do dia anterior: {date_str}")
 
     if not file_name:
         file_name = f"BVBG186_{date_str}.xml"
 
-    print(f"[INFO] Iniciando pipeline para data: {date_str}")
-    print(f"[INFO] Arquivo alvo: {file_name}")
-    print("=" * 60)
+    print_section_header("INICIANDO PIPELINE DE PROCESSAMENTO")
+    print(f"📅 Data do pregão: {date_str}")
+    print(f"📁 Arquivo alvo: {file_name}")
+    print(f"⏰ Horário de início: {print_timestamp()}")
 
     try:
         # Etapa 1: Extração (download da B3 e upload para blob local)
-        print("\n[ETAPA 1] Extração de dados da B3...")
+        print_section_header("ETAPA 1: EXTRAÇÃO DE DADOS DA B3")
+        step1_start = time.time()
+        
         try:
             extract_run(date_str)  # Passa a data para a função de extração
-            print("[OK] Extração concluída com sucesso")
+            step1_time = time.time() - step1_start
+            print(f"[{print_timestamp()}] [OK] ✅ Extração concluída com sucesso em {step1_time:.2f}s")
         except Exception as e:
-            print(f"[ERROR] Falha na extração: {e}")
+            step1_time = time.time() - step1_start
+            print(f"[{print_timestamp()}] [ERROR] ❌ Falha na extração após {step1_time:.2f}s: {e}")
             return False
 
         # Etapa 2: Transformação e Carga (processamento XML e inserção no PostgreSQL)
-        print("\n[ETAPA 2] Transformação e carga no PostgreSQL...")
+        print_section_header("ETAPA 2: TRANSFORMAÇÃO E CARGA NO POSTGRESQL")
+        step2_start = time.time()
+        
         try:
             success = transform_and_load(file_name)
+            step2_time = time.time() - step2_start
+            
             if success:
-                print("[OK] Transformação e carga concluídas com sucesso")
+                print(f"[{print_timestamp()}] [OK] ✅ Transformação e carga concluídas com sucesso em {step2_time:.2f}s")
             else:
-                print("[ERROR] Falha na transformação e carga")
+                print(f"[{print_timestamp()}] [ERROR] ❌ Falha na transformação e carga após {step2_time:.2f}s")
                 return False
         except Exception as e:
-            print(f"[ERROR] Falha na transformação e carga: {e}")
+            step2_time = time.time() - step2_start
+            print(f"[{print_timestamp()}] [ERROR] ❌ Falha na transformação e carga após {step2_time:.2f}s: {e}")
             return False
 
-        print("\n" + "=" * 60)
-        print("[SUCCESS] Pipeline executado com sucesso!")
-        print(f"[INFO] Dados da data {date_str} foram processados e inseridos no PostgreSQL")
+        # Resumo final
+        total_time = time.time() - pipeline_start_time
+        print_section_header("PIPELINE CONCLUÍDO COM SUCESSO")
+        print(f"🎉 Status: SUCESSO")
+        print(f"📊 Dados processados: {date_str}")
+        print(f"⏱️  Tempo total: {total_time:.2f}s")
+        print(f"⏰ Concluído em: {print_timestamp()}")
+        print(f"💾 Dados inseridos no PostgreSQL")
+        
         return True
 
     except KeyboardInterrupt:
-        print("\n[INFO] Pipeline interrompido pelo usuário")
+        total_time = time.time() - pipeline_start_time
+        print(f"\n[{print_timestamp()}] [INFO] ⚠️  Pipeline interrompido pelo usuário após {total_time:.2f}s")
         return False
     except Exception as e:
-        print(f"\n[ERROR] Erro inesperado no pipeline: {e}")
+        total_time = time.time() - pipeline_start_time
+        print(f"\n[{print_timestamp()}] [ERROR] ❌ Erro inesperado no pipeline após {total_time:.2f}s: {e}")
         return False
 
 def show_help():
@@ -167,16 +221,13 @@ def main():
         date_str = None
 
     # Verificar pré-requisitos
+    print_section_header("VERIFICAÇÃO DE PRÉ-REQUISITOS")
     if not check_prerequisites():
-        print("\n[ERROR] Pré-requisitos não atendidos. Pipeline não pode continuar.")
-        print("Use 'python main.py --help' para mais informações")
+        print(f"\n[{print_timestamp()}] [ERROR] ❌ Pré-requisitos não atendidos. Pipeline não pode continuar.")
+        print("💡 Use 'python main.py --help' para mais informações")
         sys.exit(1)
 
     # Executar pipeline
-    print("\n" + "=" * 60)
-    print("PIPELINE DE PROCESSAMENTO DE COTAÇÕES B3")
-    print("=" * 60)
-
     success = run_pipeline(date_str)
 
     if success:
