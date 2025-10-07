@@ -31,6 +31,27 @@ def extract_date_from_xml(xml_date_text):
         print(f"[WARN] Formato de data inválido: {xml_date_text}")
     return None
 
+def extract_datetime_from_xml(xml_date_text):
+    """
+    Extrai data e horário completos do formato XML da B3
+    Suporta formatos: 2025-10-06T23:12:53Z, 2025-10-06T23:12:53
+    """
+    try:
+        if xml_date_text:
+            date_str = xml_date_text.strip()
+            # Tenta formato de timestamp ISO com horário
+            if 'T' in date_str:
+                # Remove timezone se presente
+                if date_str.endswith('Z'):
+                    date_str = date_str[:-1]
+                return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
+            # Se não tem horário, assume meia-noite
+            elif len(date_str) == 10:  # YYYY-MM-DD
+                return datetime.strptime(date_str + "T00:00:00", "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        print(f"[WARN] Formato de data/hora inválido: {xml_date_text}")
+    return None
+
 def clean_price_value(price_text):
     """
     Limpa e converte valores de preço em texto para Decimal
@@ -147,17 +168,9 @@ def transform_and_load(file_name):
         print("[WARN] Nenhuma cotação foi extraída do arquivo")
         return False
 
-    # 2. Remover duplicatas (manter apenas o último registro por ativo+data)
-    print(f"[INFO] Removendo duplicatas dos {len(cotacoes_data)} registros...")
-    cotacoes_dict = {}
-    for cotacao in cotacoes_data:
-        key = (cotacao['ativo'], cotacao['data_pregao'])
-        cotacoes_dict[key] = cotacao  # Sobrescreve duplicatas, mantendo o último
-
-    cotacoes_unique = list(cotacoes_dict.values())
-    removed_count = len(cotacoes_data) - len(cotacoes_unique)
-    if removed_count > 0:
-        print(f"[INFO] Removidas {removed_count} duplicatas. Registros únicos: {len(cotacoes_unique)}")
+    # 2. Manter todos os registros (incluindo duplicatas diferenciadas por horário)
+    print(f"[INFO] Mantendo todos os {len(cotacoes_data)} registros (sem remoção de duplicatas)")
+    cotacoes_unique = cotacoes_data  # Usar todos os dados sem filtrar
 
     # 3. Conectar ao banco e inserir dados
     db = DatabaseManager()

@@ -15,31 +15,21 @@ Base = declarative_base()
 class Cotacoes(Base):
     """
     Modelo SQLAlchemy para a tabela Cotacoes
-    Correspondente à estrutura SQL:
-    CREATE TABLE Cotacoes (
-        Id SERIAL PRIMARY KEY,
-        Ativo VARCHAR(10),
-        DataPregao DATE,
-        Abertura DECIMAL(10,2),
-        Fechamento DECIMAL(10,2),
-        Volume DECIMAL(18,2),
-        UNIQUE(Ativo, DataPregao)
-    );
+    Permite múltiplos registros do mesmo ativo/data (diferentes transações)
     """
     __tablename__ = 'cotacoes'
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)  # PK única - permite duplicatas de ativo+data
     ativo = Column(String(10), nullable=False)
-    data_pregao = Column('datapregao', Date, nullable=False)  # Mapeia para coluna 'datapregao' no DB
+    data_pregao = Column('datapregao', Date, nullable=False)
     abertura = Column(DECIMAL(10, 2))
     fechamento = Column(DECIMAL(10, 2))
     volume = Column(DECIMAL(18, 2))
 
-    # Constraint única para evitar duplicatas de ativo+data
-    __table_args__ = (UniqueConstraint('ativo', 'datapregao', name='unique_ativo_data'),)
+    # Sem constraints únicas - cada registro é uma transação separada
 
     def __repr__(self):
-        return f"<Cotacoes(ativo='{self.ativo}', data_pregao='{self.data_pregao}', fechamento='{self.fechamento}')>"
+        return f"<Cotacoes(id={self.id}, ativo='{self.ativo}', data_pregao='{self.data_pregao}', fechamento='{self.fechamento}')>"
 
 class DatabaseManager:
     """Gerenciador da conexão com o banco PostgreSQL"""
@@ -78,7 +68,7 @@ class DatabaseManager:
 
     def insert_cotacoes_batch(self, cotacoes_list):
         """
-        Insere uma lista de cotações no banco usando inserção individual com upsert
+        Insere todas as cotações no banco (permite múltiplos registros do mesmo ativo/data)
 
         Args:
             cotacoes_list: Lista de dicionários com dados das cotações
@@ -91,37 +81,22 @@ class DatabaseManager:
         session = self.get_session()
         try:
             inserted_count = 0
-            updated_count = 0
 
             for cotacao_data in cotacoes_list:
-                # Verificar se já existe
-                existing = session.query(Cotacoes).filter(
-                    Cotacoes.ativo == cotacao_data['ativo'],
-                    Cotacoes.data_pregao == cotacao_data['data_pregao']
-                ).first()
-
-                if existing:
-                    # Atualizar registro existente
-                    existing.abertura = cotacao_data.get('abertura')
-                    existing.fechamento = cotacao_data.get('fechamento')
-                    existing.volume = cotacao_data.get('volume')
-                    updated_count += 1
-                else:
-                    # Inserir novo registro
-                    cotacao = Cotacoes(
-                        ativo=cotacao_data['ativo'],
-                        data_pregao=cotacao_data['data_pregao'],
-                        abertura=cotacao_data.get('abertura'),
-                        fechamento=cotacao_data.get('fechamento'),
-                        volume=cotacao_data.get('volume')
-                    )
-                    session.add(cotacao)
-                    inserted_count += 1
+                # Inserir cada registro - PK auto-incremento garante unicidade
+                nova_cotacao = Cotacoes(
+                    ativo=cotacao_data['ativo'],
+                    data_pregao=cotacao_data['data_pregao'],
+                    abertura=cotacao_data.get('abertura'),
+                    fechamento=cotacao_data.get('fechamento'),
+                    volume=cotacao_data.get('volume')
+                )
+                session.add(nova_cotacao)
+                inserted_count += 1
 
             session.commit()
-            total_processed = inserted_count + updated_count
-            print(f"[OK] Processadas {total_processed} cotações ({inserted_count} inseridas, {updated_count} atualizadas) no banco")
-            return total_processed
+            print(f"[OK] Inseridas {inserted_count} cotações no banco (todos os registros mantidos)")
+            return inserted_count
 
         except Exception as e:
             session.rollback()
